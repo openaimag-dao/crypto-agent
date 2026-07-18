@@ -1,0 +1,7 @@
+aiogram>=3.13
+yfinance>=0.2.40
+requests>=2.31
+pandas>=2.2
+python-dotenv>=1.0
+APScheduler>=3.10
+aiohttp>=3.9
