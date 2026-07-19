@@ -35,25 +35,17 @@ def _owner_id() -> int:
     return int(os.getenv("TELEGRAM_CHAT_ID", "0"))
 
 
-@router.message()
-async def gatekeeper(message: Message) -> None:
-    """Первый фильтр не нужен — aiogram матчит команды раньше. Этот хендлер
-    ловит всё остальное (текст без команды) и отвечает подсказкой владельцу."""
-    if message.chat.id != _owner_id():
-        return
-    await message.answer(
-        "Команды: /report — полный анализ, /balance — счёт, /positions — позиции,\n"
-        "/close &lt;id&gt; — закрыть вручную, /rejected — статистика цензора,\n"
-        "/reset confirm — сброс песочницы", parse_mode="HTML")
-
-
 def owned(handler):
-    """Декоратор: команда выполняется только для владельца."""
-    async def wrapper(message: Message, *args, **kwargs):
+    """Декоратор: команда только для владельца. Пересылает хендлеру лишь те
+    kwargs, которые он объявил (aiogram передаёт много служебных)."""
+    import inspect
+    accepted = set(inspect.signature(handler).parameters) - {"message"}
+
+    async def wrapper(message: Message, **kwargs):
         if message.chat.id != _owner_id():
             log.warning("Чужой запрос от chat_id=%s проигнорирован", message.chat.id)
             return
-        return await handler(message, *args, **kwargs)
+        return await handler(message, **{k: v for k, v in kwargs.items() if k in accepted})
     return wrapper
 
 
@@ -145,3 +137,16 @@ async def cmd_reset(message: Message, command: CommandObject) -> None:
         return
     await asyncio.to_thread(repo.reset_account)
     await message.answer("♻️ Песочница сброшена к начальному депозиту.")
+
+
+# Регистрируется ПОСЛЕДНИМ: ловит только то, что не совпало с командами
+@router.message()
+async def gatekeeper(message: Message) -> None:
+    """Первый фильтр не нужен — aiogram матчит команды раньше. Этот хендлер
+    ловит всё остальное (текст без команды) и отвечает подсказкой владельцу."""
+    if message.chat.id != _owner_id():
+        return
+    await message.answer(
+        "Команды: /report — полный анализ, /balance — счёт, /positions — позиции,\n"
+        "/close &lt;id&gt; — закрыть вручную, /rejected — статистика цензора,\n"
+        "/reset confirm — сброс песочницы", parse_mode="HTML")
