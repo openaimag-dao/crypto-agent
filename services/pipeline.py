@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from brain import cio
+from brain import cio, divergence
 from brain.indicators import TechSummary, analyze_candles
 from brain.llm_client import LLMError, request_analysis
 from brain.news import fetch_news_snapshot
@@ -41,6 +41,7 @@ class AnalysisResult:
     opened_trades: list[Trade] = field(default_factory=list)
     rejected: list[tuple[dict, str]] = field(default_factory=list)   # (идея, причина)
     errors: list[str] = field(default_factory=list)
+    divergence: divergence.DivergenceReading | None = None
 
 
 def run_full_analysis(repo: Repository, execute_trades: bool = True) -> AnalysisResult:
@@ -69,6 +70,12 @@ def run_full_analysis(repo: Repository, execute_trades: bool = True) -> Analysis
         return res
 
     news_snap = fetch_news_snapshot()
+
+    try:
+        res.divergence = divergence.fetch_reading()
+        res.macro["hood_btc_divergence"] = res.divergence.to_dict()
+    except Exception as e:  # noqa: BLE001 — вспомогательный индикатор не должен ронять анализ
+        res.errors.append(f"HOOD/BTC недоступен: {e}")
 
     # --- 2. LLM ---
     news_score = 0.0

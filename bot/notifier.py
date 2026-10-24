@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from html import escape
 
+from brain.divergence import (ABOVE_RESISTANCE, BELOW_SUPPORT, HOOD_STRONGER,
+                              HOOD_WEAKER, DivergenceReading)
+from config import HOOD_RESISTANCE, HOOD_SUPPORT
 from database.repository import Trade
 from services.pipeline import AnalysisResult
 
@@ -55,6 +58,9 @@ def format_briefing(res: AnalysisResult) -> str:
         lines.append("")
     if not res.opened_trades and not res.rejected:
         lines += ["😴 Явных сетапов нет — сегодня без сделок.", ""]
+
+    if res.divergence:
+        lines += [format_divergence(res.divergence, compact=True), ""]
 
     if res.errors:
         lines.append("⚠️ <i>Часть данных недоступна: " +
@@ -112,4 +118,39 @@ def format_positions(trades: list[Trade], prices: dict[str, float]) -> str:
             pnl_line = f"\n   тек. цена {_fmt_price(price)} | нереализ. PnL: <b>{pnl:+.2f}</b>"
         lines.append(f"#{t.id} {format_trade_opened(t, header=False)}{pnl_line}")
         lines.append("")
+    return "\n".join(lines)
+
+
+_DIV_TEXT = {
+    HOOD_WEAKER: ("🔻", "HOOD слабее BTC — риск-аппетит уходит раньше крипты. "
+                       "Исторически BTC затем догонял вниз; осторожнее с лонгами."),
+    HOOD_STRONGER: ("🔺", "HOOD сильнее BTC — розница возвращается в риск. "
+                         "Летом 2026 после такого разрыва BTC догнал вверх."),
+}
+
+
+def format_divergence(r: DivergenceReading, compact: bool = False,
+                      events: list[str] | None = None) -> str:
+    """Блок расхождения HOOD/BTC. compact — одна-две строки для брифинга."""
+    emoji, text = _DIV_TEXT.get(r.state, ("⚪", "Разрыв в норме — HOOD и BTC идут вместе."))
+    zone = {BELOW_SUPPORT: f"ниже поддержки {HOOD_SUPPORT:.0f}",
+            ABOVE_RESISTANCE: f"выше сопротивления {HOOD_RESISTANCE:.0f}"}.get(
+        r.zone, f"в диапазоне {HOOD_SUPPORT:.0f}–{HOOD_RESISTANCE:.0f}")
+    head = (f"{emoji} <b>HOOD/BTC за {r.window_days} дн.:</b> HOOD {r.hood_ret_pct:+.1f}%, "
+            f"BTC {r.btc_ret_pct:+.1f}% → разрыв <b>{r.gap_pct:+.1f} п.п.</b>")
+    if compact:
+        return head + f"\n   <i>HOOD {_fmt_price(r.hood_price)} ({zone}). {text}</i>"
+
+    title = "🚨 <b>Сигнал смены фазы: HOOD/BTC</b>" if events else "📐 <b>Расхождение HOOD/BTC</b>"
+    lines = [title, "", head, f"HOOD {_fmt_price(r.hood_price)} — {zone}",
+             f"BTC {_fmt_price(r.btc_price)}", "", text]
+    if events and "zone" in events:
+        if r.zone == BELOW_SUPPORT:
+            lines.append(f"⚠️ HOOD пробил поддержку {HOOD_SUPPORT:.0f} — подтверждение ухода от риска.")
+        elif r.zone == ABOVE_RESISTANCE:
+            lines.append(f"✅ HOOD вернулся выше {HOOD_RESISTANCE:.0f} — риск-аппетит восстанавливается.")
+        else:
+            lines.append("HOOD вернулся в диапазон — зона снова нейтральна.")
+    lines += ["", f"<i>Данные на {r.as_of}. Подтверждающий индикатор (2–3 эпизода в истории), "
+                  "не торговый сигнал.</i>"]
     return "\n".join(lines)
