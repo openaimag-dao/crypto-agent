@@ -6,6 +6,8 @@
     полный анализ + брифинг в чат владельца.
   - position_monitor: каждые MONITOR_INTERVAL_MIN минут — проверка SL/TP,
     уведомление о каждом закрытии.
+  - divergence_monitor: каждые DIVERGENCE_INTERVAL_MIN минут — разрыв HOOD/BTC,
+    алерт только при смене состояния или пробое зоны HOOD.
 
 Запуск: python main.py  (перед этим заполнить .env по образцу .env.example)
 """
@@ -23,6 +25,7 @@ from dotenv import load_dotenv
 
 from bot import notifier
 from bot.handlers import router, repo, _analysis_lock
+from brain import divergence
 from services.pipeline import monitor_open_positions, run_full_analysis
 from utils.logger import get_logger
 
@@ -33,6 +36,7 @@ TIMEZONE = os.getenv("TIMEZONE", "Asia/Almaty")
 BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))
 BRIEFING_MINUTE = int(os.getenv("BRIEFING_MINUTE", "0"))
 MONITOR_INTERVAL_MIN = int(os.getenv("MONITOR_INTERVAL_MIN", "5"))
+DIVERGENCE_INTERVAL_MIN = int(os.getenv("DIVERGENCE_INTERVAL_MIN", "60"))
 
 
 async def morning_briefing(bot: Bot, chat_id: int) -> None:
@@ -60,6 +64,17 @@ async def position_monitor(bot: Bot, chat_id: int) -> None:
         log.exception("Сбой мониторинга позиций")
 
 
+async def divergence_monitor(bot: Bot, chat_id: int) -> None:
+    """Алерт только при смене состояния разрыва HOOD/BTC или зоны HOOD."""
+    try:
+        reading, events = await asyncio.to_thread(divergence.check_for_alert)
+        if events:
+            await bot.send_message(chat_id, notifier.format_divergence(reading, events=events),
+                                   parse_mode="HTML")
+    except Exception:  # noqa: BLE001
+        log.exception("Сбой мониторинга HOOD/BTC")
+
+
 async def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
@@ -82,6 +97,11 @@ async def main() -> None:
     scheduler.add_job(
         position_monitor, IntervalTrigger(minutes=MONITOR_INTERVAL_MIN),
         args=(bot, chat_id), id="monitor",
+        max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        divergence_monitor, IntervalTrigger(minutes=DIVERGENCE_INTERVAL_MIN),
+        args=(bot, chat_id), id="divergence",
         max_instances=1, coalesce=True,
     )
     scheduler.start()

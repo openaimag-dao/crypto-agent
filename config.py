@@ -20,6 +20,13 @@ CRYPTO_SYMBOLS: list[str] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 KLINES_INTERVAL = "4h"
 KLINES_LIMIT = 100
 
+# ============ РАСХОЖДЕНИЕ HOOD / BTC (brain/divergence.py) ============
+DIVERGENCE_WINDOW_DAYS = 28      # окно сравнения доходностей (≈4 недели)
+DIVERGENCE_ENTER_PCT = 15.0      # разрыв (п.п.), при котором включается сигнал
+DIVERGENCE_EXIT_PCT = 10.0       # разрыв, ниже которого сигнал гаснет (гистерезис)
+HOOD_SUPPORT = 87.0              # зона отскока августа 2026
+HOOD_RESISTANCE = 110.0          # возврат выше — риск-аппетит вернулся
+
 # ============ РИСК-МЕНЕДЖМЕНТ (ЖЕСТКИЕ ЛИМИТЫ) ============
 ALLOWED_LEVERAGE: tuple[int, ...] = (3, 5)   # только 3x или 5x, иное — отказ
 MAX_RISK_PER_TRADE_PCT = 5.0                  # максимум 5% депозита на сделку

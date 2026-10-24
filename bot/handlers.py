@@ -18,6 +18,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from bot import notifier
+from brain import divergence
 from collectors.crypto import fetch_last_price
 from database.repository import Repository
 from services.pipeline import run_full_analysis
@@ -59,6 +60,7 @@ async def cmd_start(message: Message) -> None:
         "/positions — открытые позиции с текущим PnL\n"
         "/close &lt;id&gt; — закрыть позицию по рынку\n"
         "/rejected — что и почему отклонил цензор\n"
+        "/hood — расхождение HOOD/BTC (индикатор фазы рынка)\n"
         "/reset confirm — сброс песочницы к депозиту\n\n"
         "Утренний брифинг приходит автоматически.", parse_mode="HTML")
 
@@ -128,6 +130,17 @@ async def cmd_rejected(message: Message) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.message(Command("hood"))
+@owned
+async def cmd_hood(message: Message) -> None:
+    try:
+        r = await asyncio.to_thread(divergence.fetch_reading)
+        await message.answer(notifier.format_divergence(r), parse_mode="HTML")
+    except Exception as e:  # noqa: BLE001
+        log.exception("Сбой /hood")
+        await message.answer(f"❌ Не удалось получить данные HOOD/BTC: {e}")
+
+
 @router.message(Command("reset"))
 @owned
 async def cmd_reset(message: Message, command: CommandObject) -> None:
@@ -149,4 +162,5 @@ async def gatekeeper(message: Message) -> None:
     await message.answer(
         "Команды: /report — полный анализ, /balance — счёт, /positions — позиции,\n"
         "/close &lt;id&gt; — закрыть вручную, /rejected — статистика цензора,\n"
+        "/hood — расхождение HOOD/BTC,\n"
         "/reset confirm — сброс песочницы", parse_mode="HTML")
