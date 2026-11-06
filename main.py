@@ -8,6 +8,8 @@
     уведомление о каждом закрытии.
   - divergence_monitor: каждые DIVERGENCE_INTERVAL_MIN минут — разрыв HOOD/BTC,
     алерт только при смене состояния или пробое зоны HOOD.
+  - whales_report: ежедневно в WHALES_HOUR:WHALES_MINUTE — что за сутки сделали
+    прибыльные кошельки Hyperliquid (config.WHALE_WALLETS).
 
 Запуск: python main.py  (перед этим заполнить .env по образцу .env.example)
 """
@@ -26,6 +28,7 @@ from dotenv import load_dotenv
 from bot import notifier
 from bot.handlers import router, repo, _analysis_lock
 from brain import divergence
+from collectors import whales
 from services.pipeline import monitor_open_positions, run_full_analysis
 from utils.logger import get_logger
 
@@ -37,6 +40,8 @@ BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "8"))
 BRIEFING_MINUTE = int(os.getenv("BRIEFING_MINUTE", "0"))
 MONITOR_INTERVAL_MIN = int(os.getenv("MONITOR_INTERVAL_MIN", "5"))
 DIVERGENCE_INTERVAL_MIN = int(os.getenv("DIVERGENCE_INTERVAL_MIN", "60"))
+WHALES_HOUR = int(os.getenv("WHALES_HOUR", "8"))
+WHALES_MINUTE = int(os.getenv("WHALES_MINUTE", "10"))
 
 
 async def morning_briefing(bot: Bot, chat_id: int) -> None:
@@ -75,6 +80,24 @@ async def divergence_monitor(bot: Bot, chat_id: int) -> None:
         log.exception("Сбой мониторинга HOOD/BTC")
 
 
+async def whales_report(bot: Bot, chat_id: int) -> None:
+    """Ежедневная сводка по китам Hyperliquid."""
+    try:
+        text = await asyncio.to_thread(build_whales_report)
+        for part in notifier.split_message(text):
+            await bot.send_message(chat_id, part, parse_mode="HTML",
+                                   disable_web_page_preview=True)
+    except Exception:  # noqa: BLE001
+        log.exception("Сбой сводки по китам")
+        await bot.send_message(chat_id, "❌ Сводка по китам Hyperliquid упала, детали в логах.")
+
+
+def build_whales_report() -> str:
+    snaps = whales.fetch_all()
+    return notifier.format_whales(snaps, whales.net_exposure(snaps),
+                                  whales.WHALE_LOOKBACK_HOURS)
+
+
 async def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = int(os.getenv("TELEGRAM_CHAT_ID", "0"))
@@ -103,6 +126,11 @@ async def main() -> None:
         divergence_monitor, IntervalTrigger(minutes=DIVERGENCE_INTERVAL_MIN),
         args=(bot, chat_id), id="divergence",
         max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        whales_report, CronTrigger(hour=WHALES_HOUR, minute=WHALES_MINUTE),
+        args=(bot, chat_id), id="whales",
+        misfire_grace_time=600,
     )
     scheduler.start()
 
