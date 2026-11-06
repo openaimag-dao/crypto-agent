@@ -19,6 +19,7 @@ from aiogram.types import Message
 
 from bot import notifier
 from brain import divergence
+from collectors import whales
 from collectors.crypto import fetch_last_price
 from database.repository import Repository
 from services.pipeline import run_full_analysis
@@ -61,6 +62,7 @@ async def cmd_start(message: Message) -> None:
         "/close &lt;id&gt; — закрыть позицию по рынку\n"
         "/rejected — что и почему отклонил цензор\n"
         "/hood — расхождение HOOD/BTC (индикатор фазы рынка)\n"
+        "/whales — что за сутки сделали киты Hyperliquid\n"
         "/reset confirm — сброс песочницы к депозиту\n\n"
         "Утренний брифинг приходит автоматически.", parse_mode="HTML")
 
@@ -141,6 +143,21 @@ async def cmd_hood(message: Message) -> None:
         await message.answer(f"❌ Не удалось получить данные HOOD/BTC: {e}")
 
 
+@router.message(Command("whales"))
+@owned
+async def cmd_whales(message: Message) -> None:
+    await message.answer("🐋 Собираю сделки китов Hyperliquid…")
+    try:
+        snaps = await asyncio.to_thread(whales.fetch_all)
+        text = notifier.format_whales(snaps, whales.net_exposure(snaps),
+                                      whales.WHALE_LOOKBACK_HOURS)
+        for part in notifier.split_message(text):
+            await message.answer(part, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception as e:  # noqa: BLE001
+        log.exception("Сбой /whales")
+        await message.answer(f"❌ Не удалось получить данные Hyperliquid: {e}")
+
+
 @router.message(Command("reset"))
 @owned
 async def cmd_reset(message: Message, command: CommandObject) -> None:
@@ -162,5 +179,5 @@ async def gatekeeper(message: Message) -> None:
     await message.answer(
         "Команды: /report — полный анализ, /balance — счёт, /positions — позиции,\n"
         "/close &lt;id&gt; — закрыть вручную, /rejected — статистика цензора,\n"
-        "/hood — расхождение HOOD/BTC,\n"
+        "/hood — расхождение HOOD/BTC, /whales — киты Hyperliquid,\n"
         "/reset confirm — сброс песочницы", parse_mode="HTML")

@@ -154,3 +154,89 @@ def format_divergence(r: DivergenceReading, compact: bool = False,
     lines += ["", f"<i>Данные на {r.as_of}. Подтверждающий индикатор (2–3 эпизода в истории), "
                   "не торговый сигнал.</i>"]
     return "\n".join(lines)
+
+
+# ---------- Киты Hyperliquid ----------
+
+def _usd(v: float) -> str:
+    """Компактная сумма: $1.2M / $350K / $900."""
+    a = abs(v)
+    s = f"${a/1e6:.1f}M" if a >= 1e6 else f"${a/1e3:.0f}K" if a >= 1e3 else f"${a:.0f}"
+    return ("−" if v < 0 else "") + s
+
+
+def _coin(c: str) -> str:
+    """HIP-3 рынки акций приходят как 'xyz:ORCL' — показываем как 'ORCL (акция)'."""
+    return f"{c.split(':', 1)[1]} (акция)" if ":" in c else c
+
+
+def split_message(text: str, limit: int = 4000) -> list[str]:
+    """Режет длинную сводку по абзацам под лимит Telegram (4096 символов)."""
+    parts, cur = [], ""
+    for block in text.split("\n\n"):
+        cand = f"{cur}\n\n{block}" if cur else block
+        if len(cand) > limit and cur:
+            parts.append(cur)
+            cur = block
+        else:
+            cur = cand
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+_ACTION_RU = {"Open Long": "открыл лонг", "Open Short": "открыл шорт",
+              "Close Long": "закрыл лонг", "Close Short": "закрыл шорт",
+              "Long > Short": "перевернул в шорт", "Short > Long": "перевернул в лонг"}
+
+
+def format_whales(snaps, exposure: dict, lookback_hours: int = 24) -> str:
+    """Сводка по китам Hyperliquid: сделки за окно + текущие позиции + консенсус."""
+    lines = [f"🐋 <b>Киты Hyperliquid — сводка за {lookback_hours} ч</b>", ""]
+
+    for s in snaps:
+        short_addr = f"{s.address[:6]}…{s.address[-4:]}"
+        link = f'<a href="https://hypurrscan.io/address/{s.address}">{short_addr}</a>'
+        if not s.ok:
+            lines += [f"⚠️ <b>{escape(s.label)}</b> {link}: нет данных", ""]
+            continue
+        head = f"<b>{escape(s.label)}</b> {link}"
+        if s.account_value > 0:
+            head += f" · счёт {_usd(s.account_value)} · плечо {s.gross_leverage:.1f}x"
+        lines.append(head)
+
+        if s.activity:
+            pnl_emoji = "🟢" if s.realized_pnl_window >= 0 else "🔴"
+            lines.append(f"   {pnl_emoji} реализовано: <b>{_usd(s.realized_pnl_window)}</b>")
+            for a in s.activity[:5]:
+                acts = ", ".join(_ACTION_RU.get(x, escape(x)) for x in sorted(a.actions))
+                vol = []
+                if a.opened_usd:
+                    vol.append(f"откр. {_usd(a.opened_usd)}")
+                if a.closed_usd:
+                    vol.append(f"закр. {_usd(a.closed_usd)}")
+                pnl = f", PnL {_usd(a.realized_pnl)}" if abs(a.realized_pnl) >= 1000 else ""
+                lines.append(f"   • {escape(_coin(a.coin))}: {acts} ({' / '.join(vol)}{pnl})")
+        else:
+            lines.append("   😴 сделок не было")
+
+        if s.positions:
+            pos = ", ".join(f"{escape(_coin(p.coin))} {'🟢L' if p.direction == 'LONG' else '🔴S'} "
+                            f"{_usd(p.notional_usd)} x{p.leverage:g}" for p in s.positions[:4])
+            lines.append(f"   📌 держит: {pos}")
+        else:
+            lines.append("   📭 позиций нет")
+        lines.append("")
+
+    if exposure:
+        lines.append("⚖️ <b>Консенсус китов (открытые позиции):</b>")
+        for coin, e in list(exposure.items())[:6]:
+            net = e["long"] - e["short"]
+            side = "🟢 нетто-лонг" if net > 0 else "🔴 нетто-шорт"
+            lines.append(f"   {escape(_coin(coin))}: {side} {_usd(abs(net))} "
+                         f"(лонгов {e['longs']}, шортов {e['shorts']})")
+        lines.append("")
+
+    lines.append("<i>Только наблюдение: киты торгуют с плечом до 40x, их сделки — "
+                 "контекст, а не сигнал на вход.</i>")
+    return "\n".join(lines)
